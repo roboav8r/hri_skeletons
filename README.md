@@ -16,6 +16,11 @@ Installation
 
 - Install the [`hri_msgs` package](https://github.com/ros4hri/hri_msgs/blob/master/README.md)
 
+- pip3 install ikpy
+
+- in your workspace, check that dependencies are installed
+cd ~/my_ws && rosdep install -i --from-path src --rosdistro foxy -y
+
 - then:
 
 ```
@@ -28,8 +33,9 @@ $ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=~/dev .. && make && ma
 
 You can test this node by running:
 ```
-$ rosrun usb_cam usb_cam
+$ ros2 run usb_cam usb_cam_node_exe
 $ rosrun hri_skeletons run image:=/usb_cam/image_raw _debug:=true _model:=$HOME/openvino_models/public/human-pose-estimation-3d-0001/FP16/human-pose-estimation-3d-0001.xml
+$ ros2 run rviz2 rviz2 # to visualize
 ```
 
 which should display something like that (debug mode = true):
