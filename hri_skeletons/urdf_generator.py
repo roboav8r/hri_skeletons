@@ -1,8 +1,8 @@
 import xacro
-import rospkg
+from ament_index_python.packages import get_package_share_directory
 from pathlib import Path
 
-TPL = Path(rospkg.RosPack().get_path("hri_skeletons")) / "human-tpl.xacro"
+TPL = Path(get_package_share_directory('hri_skeletons'))/"human-tpl.xacro"
 
 def make_urdf_human(body_id,
                head_radius = None,
