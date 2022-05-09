@@ -25,18 +25,19 @@ import uuid
 import cv2
 import numpy as np
 
-from hri_skeletons.urdf_generator import make_urdf_human
-from hri_skeletons.jointstate import compute_jointstate, HUMAN_JOINT_NAMES
-from hri_skeletons.modules.inference_engine import InferenceEngine
-from hri_skeletons.modules.input_reader import InputReader
-from hri_skeletons.modules.draw import Plotter3d, draw_poses
-from hri_skeletons.modules.parse_poses import parse_poses
+from urdf_generator import make_urdf_human
+from jointstate import compute_jointstate, HUMAN_JOINT_NAMES
+from modules.inference_engine import InferenceEngine
+from modules.input_reader import InputReader
+from modules.draw import Plotter3d, draw_poses
+from modules.parse_poses import parse_poses
 
 from ikpy import chain
 import io # used to wrap the URDF in a file-like object, to be fed to ikpy
 
-import rospy
-import rosparam
+import rclpy
+from rclpy.node import Node
+#import rosparam
 
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import JointState
@@ -55,11 +56,35 @@ def generate_id():
     return str(uuid.uuid4())[:5].replace('e','a')
 
 
-class HumanPoseEstimator3D:
+class HumanPoseEstimator3D(Node):
     
     def __init__(self, model, device, height_size, debug=False):
 
-        self.debug = debug
+        super().__init__('hri_skeletons')
+
+        # Declare parameters with default values as appropriate
+                #model = rospy.get_param("~model")
+
+        # one of: CPU, GPU, FPGA, HDDL or MYRIAD. '
+        #device = rospy.get_param("~device", "CPU")
+
+        # Network input layer height size.
+        #height_size = rospy.get_param("~height_size", 256)
+
+        # if true, display a 3D canvas with the skeletons
+        #debug = rospy.get_param("~debug", False)
+
+        # link to the XML file containing the OpenVINO model for 3D human pose estimation
+        # https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/human-pose-estimation-3d-0001/description/human-pose-estimation-3d-0001.md
+        self.declare_parameter('model')
+        self.declare_parameter('device','CPU')
+        self.declare_parameter('height_size', 256)
+        self.declare_parameter('debug', False)
+
+        model = self.get_parameter('model')
+        device = self.get_parameter('device')
+        height_size = self.get_parameter('height_size')
+        self.debug = self.get_parameter('debug')
 
         self.bridge = CvBridge()
 
@@ -70,9 +95,9 @@ class HumanPoseEstimator3D:
    
         self.stride = 8
 
-        rospy.loginfo("Instanciating the OpenVino inference engine...")
+        self.get_logger().info("Instantiating the OpenVino inference engine...")
         self.inference_engine = InferenceEngine(model, device, self.stride)
-        rospy.loginfo("Done instanciating the OpenVino inference engine")
+        self.get_logger().info("Done instantiating the OpenVino inference engine")
     
         if self.debug:
    
@@ -97,8 +122,8 @@ class HumanPoseEstimator3D:
     
         self.mean_time = 0
 
-        self.subscriber = rospy.Subscriber("image", Image, self.on_image_cb,  queue_size = 1)
-        rospy.loginfo("Waiting for frames")
+        self.subscriber = self.create_subscription(Image, "image", self.on_image_cb, queue_size = 1)
+        self.get_logger().info("Waiting for frames")
     
     def rotate_poses(self, poses_3d):
         for pose_id in range(poses_3d.shape[0]):
@@ -113,9 +138,9 @@ class HumanPoseEstimator3D:
         # 1. generate a URDF model for this body, and set it on the
         #    ROS parameter server
         urdf = make_urdf_human(body_id)
-        rospy.loginfo("Setting URDF description for body <%s> (param name: human_description_%s)" % (body_id, body_id))
+        self.get_logger().info("Setting URDF description for body <%s> (param name: human_description_%s)" % (body_id, body_id))
         human_description = "human_description_%s" % body_id
-        rosparam.set_param_raw(human_description, urdf)
+        self.declare_parameter(human_description, urdf)
 
         urdf_file = io.StringIO(urdf)
         r_arm_chain = chain.Chain.from_urdf_file(urdf_file,
@@ -144,30 +169,30 @@ class HumanPoseEstimator3D:
         # 2. create the publishers for the 2D skeleton and joint state
         prefix = TOPIC_PREFIX + "%s/" % body_id
         self.publishers[body_id] = [
-                rospy.Publisher(prefix + "skeleton2d", Skeleton2D, queue_size=1),
-                rospy.Publisher(prefix + "joint_states", JointState, queue_size=1)
+                self.create_publisher(Skeleton2D, prefix + "skeleton2d", queue_size=1),
+                self.create_publisher(JointState, prefix + "joint_states", queue_size=1)
                 ]
 
         # 3. spawn a new robot_state_publisher process, which will publish the
-        #    TF frames for this body
-        rospy.loginfo("Spawning a instance of robot_state_publisher for this body...")
-        cmd =["rosrun", "robot_state_publisher", "robot_state_publisher", 
+        #    TF frames for this body [[TODO come back here]]
+        self.get_logger().info("Spawning a instance of robot_state_publisher for this body...")
+        cmd =["ros2 run", "robot_state_publisher", "robot_state_publisher", 
               "__name:=robot_state_publisher_body_%s" % body_id,
               "joint_states:=%s" % (prefix + "joint_states"),
               "robot_description:=%s" % human_description,
               "_publish_frequency:=25",
               "_use_tf_static:=false"
               ]
-        rospy.loginfo("Executing: %s" % " ".join(cmd))
+        self.get_logger().info("Executing: %s" % " ".join(cmd))
         proc = subprocess.Popen(cmd,
                           stdout=sys.stdout,
                           stderr=subprocess.STDOUT)
         self.robot_state_publishers[body_id] = proc
 
     def delete_body_id(self, body_id):
-        rospy.loginfo("Removing body <%s>..." % body_id)
+        self.get_logger().info("Removing body <%s>..." % body_id)
         for p in self.publishers[body_id]:
-            p.unregister()
+            self.destroy_publisher(p)
         del self.publishers[body_id]
 
         self.robot_state_publishers[body_id].terminate()
@@ -241,12 +266,12 @@ class HumanPoseEstimator3D:
 
     def on_image_cb(self, data):
 
-        rospy.loginfo_once("Got first frame! Starting skeleton detection")
+        self.get_logger().info("Got first frame! Starting skeleton detection")
 
         try:
             frame = self.bridge.imgmsg_to_cv2(data, "bgr8")
         except CvBridgeError as e:
-            rospy.logerr(e)
+            self.get_logger().error(e)
             return
     
         current_time = cv2.getTickCount()
@@ -335,29 +360,21 @@ class HumanPoseEstimator3D:
 
 
 
-if __name__ == '__main__':
-    
-    rospy.init_node("hri_skeletons")
+def main(args=None):
+    rclpy.init(args=args)
 
-    # link to the XML file containing the OpenVINO model for 3D human pose estimation
-    # https://github.com/openvinotoolkit/open_model_zoo/blob/master/models/public/human-pose-estimation-3d-0001/description/human-pose-estimation-3d-0001.md
-    model = rospy.get_param("~model")
-
-    # one of: CPU, GPU, FPGA, HDDL or MYRIAD. '
-    device = rospy.get_param("~device", "CPU")
-
-    # Network input layer height size.
-    height_size = rospy.get_param("~height_size", 256)
-
-    # if true, display a 3D canvas with the skeletons
-    debug = rospy.get_param("~debug", False)
-    if debug:
-        rospy.logwarn("Debugging mode ON")
-
+    # Create the Estimator object
     estimator = HumanPoseEstimator3D(model, device, height_size, debug)
 
+    if estimator.get_parameter('debug'):
+        estimator.get_logger().warn("Debugging mode ON")
+
     try:
-        rospy.spin()
+        rclpy.spin(estimator)
     except KeyboardInterrupt:
-        rospy.loginfo("Shutting down")
+        estimator.get_logger().info("Shutting down")
         cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    main()
