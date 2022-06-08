@@ -35,6 +35,7 @@ install(PROGRAMS
   hri_skeletons/run
   hri_skeletons/urdf_generator.py
   hri_skeletons/jointstate.py
+  urdf/human-tpl.xacro
   DESTINATION lib/${PROJECT_NAME}
 )
 install(PROGRAMS

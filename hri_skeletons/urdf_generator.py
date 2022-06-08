@@ -1,8 +1,8 @@
 import xacro
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_prefix
 from pathlib import Path
 
-TPL = Path(get_package_share_directory('hri_skeletons'))/"human-tpl.xacro"
+TPL = Path(get_package_prefix('hri_skeletons'))/"lib/hri_skeletons/human-tpl.xacro"
 
 def make_urdf_human(body_id,
                head_radius = None,
